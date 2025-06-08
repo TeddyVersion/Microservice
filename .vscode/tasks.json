@@ -1,0 +1,13 @@
+{
+    // ...existing code...
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Hello App",
+            "type": "shell",
+            "command": "go run ./cmd/hello",
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}
