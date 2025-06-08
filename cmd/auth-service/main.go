@@ -1,13 +1,35 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
+	"gosmart/pkg/db"
 	"gosmart/pkg/jwt"
 	"gosmart/pkg/validation"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+var sqlDB *sql.DB
+
+func initDB() {
+	dsn := os.Getenv("PG_DSN")
+	if dsn == "" {
+		panic("PG_DSN environment variable not set")
+	}
+	database, err := db.NewPostgres(dsn)
+	if err != nil {
+		panic(err)
+	}
+	if err := database.Ping(); err != nil {
+		panic(err)
+	}
+	sqlDB = database
+}
 
 type RegisterRequest struct {
 	Phone    string `json:"phone"`
@@ -40,9 +62,29 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: err.Error()})
 		return
 	}
-	// Simulate storing the user
-	users = append(users, req)
-	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]string{"user_id": fmt.Sprintf("u%d", len(users))}})
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Failed to hash password"})
+		return
+	}
+	var userID int
+	err = sqlDB.QueryRow(
+		"INSERT INTO users (phone, password_hash) VALUES ($1, $2) RETURNING id",
+		req.Phone, string(hash),
+	).Scan(&userID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Failed to create user: " + err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]interface{}{"user_id": userID}})
+}
+
+type User struct {
+	ID       int    `json:"id"`
+	Phone    string `json:"phone"`
+	Password string `json:"-"`
 }
 
 func listUsersHandler(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +92,20 @@ func listUsersHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Method not allowed"})
 		return
+	}
+	rows, err := sqlDB.Query("SELECT id, phone FROM users")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Failed to fetch users"})
+		return
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Phone); err == nil {
+			users = append(users, u)
+		}
 	}
 	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: users})
 }
@@ -80,6 +136,7 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	initDB()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")

@@ -1,13 +1,41 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
+	"gosmart/pkg/db"
 	"gosmart/pkg/jwt"
 	"gosmart/pkg/validation"
 )
+
+var sqlDB *sql.DB
+
+func initDB() {
+	dsn := os.Getenv("PG_DSN")
+	if dsn == "" {
+		panic("PG_DSN environment variable not set")
+	}
+	database, err := db.NewPostgres(dsn)
+	if err != nil {
+		panic(err)
+	}
+	if err := database.Ping(); err != nil {
+		panic(err)
+	}
+	sqlDB = database
+}
+
+type BillPayment struct {
+	ID        int     `json:"id"`
+	UserID    int     `json:"user_id"`
+	Biller    string  `json:"biller"`
+	Amount    float64 `json:"amount"`
+	Reference string  `json:"reference"`
+}
 
 type BillPaymentRequest struct {
 	UserID string  `json:"user_id"`
@@ -42,9 +70,17 @@ func payBillHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: err.Error()})
 		return
 	}
-	// Simulate storing the bill payment
-	billPayments = append(billPayments, req)
-	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]string{"payment_id": fmt.Sprintf("pay%d", len(billPayments))}})
+	var paymentID int
+	err := sqlDB.QueryRow(
+		"INSERT INTO bill_payments (user_id, biller, amount, reference) VALUES ($1, $2, $3, $4) RETURNING id",
+		req.UserID, req.Biller, req.Amount, req.Ref,
+	).Scan(&paymentID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Failed to create bill payment: " + err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]interface{}{"payment_id": paymentID}})
 }
 
 func listBillPaymentsHandler(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +89,21 @@ func listBillPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Method not allowed"})
 		return
 	}
-	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: billPayments})
+	rows, err := sqlDB.Query("SELECT id, user_id, biller, amount, reference FROM bill_payments")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Failed to fetch bill payments"})
+		return
+	}
+	defer rows.Close()
+	var payments []BillPayment
+	for rows.Next() {
+		var p BillPayment
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Biller, &p.Amount, &p.Reference); err == nil {
+			payments = append(payments, p)
+		}
+	}
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: payments})
 }
 
 func authMiddleware(next http.Handler) http.Handler {
@@ -82,6 +132,7 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	initDB()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
