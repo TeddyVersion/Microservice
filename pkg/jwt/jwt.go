@@ -14,7 +14,6 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateToken creates a new JWT token for a given user ID
 func GenerateToken(userID string) (string, error) {
 	claims := Claims{
 		UserID: userID,
@@ -26,7 +25,6 @@ func GenerateToken(userID string) (string, error) {
 	return token.SignedString(secret)
 }
 
-// ParseToken parses the JWT token and returns the claims
 func ParseToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return secret, nil
