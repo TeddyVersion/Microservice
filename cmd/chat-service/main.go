@@ -18,6 +18,8 @@ type APIResponse struct {
 	Message string      `json:"message,omitempty"`
 }
 
+var messages = []ChatMessage{}
+
 func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -30,8 +32,34 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Invalid request"})
 		return
 	}
-	// TODO: Add chat message logic here
-	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]string{"message_id": "msg123"}})
+	messages = append(messages, msg)
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: map[string]string{"message_id": fmt.Sprintf("msg%d", len(messages))}})
+}
+
+func listMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Method not allowed"})
+		return
+	}
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: messages})
+}
+
+func getConversationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{Status: "error", Message: "Method not allowed"})
+		return
+	}
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	var convo []ChatMessage
+	for _, m := range messages {
+		if (m.From == from && m.To == to) || (m.From == to && m.To == from) {
+			convo = append(convo, m)
+		}
+	}
+	json.NewEncoder(w).Encode(APIResponse{Status: "success", Data: convo})
 }
 
 func main() {
@@ -39,6 +67,8 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 	http.HandleFunc("/chat/send", sendMessageHandler)
+	http.HandleFunc("/chat/list", listMessagesHandler)
+	http.HandleFunc("/chat/conversation", getConversationHandler)
 	fmt.Println("chat-service running on :8083")
 	http.ListenAndServe(":8083", nil)
 }
