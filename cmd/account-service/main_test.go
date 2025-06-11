@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -26,7 +26,7 @@ func TestGetAccountsHandler(t *testing.T) {
 
 func TestCreateAccountHandler(t *testing.T) {
 	accounts = []Account{} // reset
-	body := strings.NewReader(`{"balance": 500, "type": "savings"}`)
+	body := bytes.NewReader([]byte(`{"balance": 500, "type": "savings"}`))
 	req := httptest.NewRequest(http.MethodPost, "/accounts", body)
 	rec := httptest.NewRecorder()
 	createAccountHandler(rec, req)
